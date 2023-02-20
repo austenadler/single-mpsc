@@ -1,0 +1,62 @@
+= single-mpsc
+
+This crate provides a single-value mpsc channel that blocks on `recv`, but doesn't block on `send` by replacing the single value to `send` is called.
+
+This crate is backed by an `Option<T>` where `send` calls are `*single_value = Some(T)` and `recv` calls `.take()`, but blocks if the value is `None`.
+
+Any message sent to this channel will update the latest value and the previous value is dropped.
+
+This is similar to the blocking [`std::sync::mpsc::sync_channel`]/`crossbeam::channel::bounded(1)`, except senders will not block when sending messages (except for when acquiring a Mutex lock).
+
+A good use-case for this is debouncing expensive code to run only once after any number of sends. For example, when a user is typing, the [`Sender`] part can send each key to the channel and the [`Receiver`] part can fire an expensive function off on each [`Receiver::recv`] call. Since each send just updates the latest value, only 1 value will be available for `recv` at a time
+
+== Usage
+
+This crate isn't published to rust crates, because I don't know how to do that yet.
+You can use it with:
+
+[source]
+----
+[dependencies]
+single-mpsc = { git = "https://github.com/austenadler/single-mpsc" }
+----
+
+== Example
+
+[source,rust]
+----
+use single_mpsc::channel;
+use std::sync::atomic::AtomicUsize;
+
+static EXPENSIVE_CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+let (tx, mut rx) = channel();
+
+// This function takes 30 seconds to run
+let expensive_fn = |i| {
+    eprintln!("Expensive function on {i}...");
+    EXPENSIVE_CALL_COUNT.fetch_add(1, Ordering::SeqCst);
+
+    std::thread::sleep(std::time::Duration::from_secs(15));
+};
+
+// Add 10 events, 1 per second
+std::thread::spawn(move || {
+    for i in 0..10 {
+        tx.send(i);
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+
+    // Receiver knows when the last transmitter is dropped
+    std::mem::drop(tx);
+});
+
+while let Ok(msg) = rx.recv() {
+    // Runs once with the first message 0
+    // Then, since this function is so slow, runs a second time with the most recent message 10
+    expensive_fn(msg);
+}
+
+// The expensive should have only been called twice
+assert_eq!(EXPENSIVE_CALL_COUNT.load(Ordering::SeqCst), 2);
+----
