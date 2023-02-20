@@ -11,14 +11,19 @@
 //!
 //! ```
 //! use single_mpsc::channel;
+//! use std::sync::atomic::AtomicUsize;
+//! use std::sync::atomic::Ordering;
+//!
+//! static EXPENSIVE_CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
 //!
 //! let (tx, mut rx) = channel();
 //!
 //! // This function takes 30 seconds to run
 //! let expensive_fn = |i| {
 //!     eprintln!("Expensive function on {i}...");
+//!     EXPENSIVE_CALL_COUNT.fetch_add(1, Ordering::SeqCst);
 //!
-//!     std::thread::sleep(std::time::Duration::from_secs(30));
+//!     std::thread::sleep(std::time::Duration::from_secs(15));
 //! };
 //!
 //! // Add 10 events, 1 per second
@@ -37,6 +42,9 @@
 //!     // Then, since this function is so slow, runs a second time with the most recent message 10
 //!     expensive_fn(msg);
 //! }
+//!
+//! // The expensive should have only been called twice
+//! assert_eq!(EXPENSIVE_CALL_COUNT.load(Ordering::SeqCst), 2);
 //! ```
 
 pub mod iter;
